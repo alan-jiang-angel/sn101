@@ -1,0 +1,71 @@
+"""Shared task framework.
+
+Task authors usually import names from ``tag101.tasks``. This subpackage
+keeps reusable schemas, signing, registry, client, and scoring code away from
+the top-level task modules that project teams customize.
+"""
+
+from .base import (
+    AnswerScorer,
+    MinerSolver,
+    TaskAnswer,
+    TaskHandler,
+    TaskPayload,
+    TaskProfile,
+)
+from .models import (
+    LeaseRequest,
+    MinerAxonAnnouncement,
+    MinerAxonRequest,
+    MinerAxonResponse,
+    MinerResult,
+    ResultReport,
+    ScoreboardRequest,
+    ScoreboardSnapshot,
+    SignedLeaseRequest,
+    SignedMinerAxonAnnouncement,
+    SignedMinerAxonRequest,
+    SignedResultReport,
+    SignedScoreboardRequest,
+    SignedScoreboardSnapshot,
+    TaskLease,
+)
+from .registry import TaskRegistry, default_registry
+from .scoring import MinerScore, ScoreBreakdown
+
+
+def __getattr__(name: str):
+    if name == "TaskServerClient":
+        from .client import TaskServerClient
+
+        return TaskServerClient
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+__all__ = [
+    "AnswerScorer",
+    "LeaseRequest",
+    "MinerAxonAnnouncement",
+    "MinerAxonRequest",
+    "MinerAxonResponse",
+    "MinerResult",
+    "MinerScore",
+    "MinerSolver",
+    "ResultReport",
+    "ScoreboardRequest",
+    "ScoreboardSnapshot",
+    "ScoreBreakdown",
+    "SignedLeaseRequest",
+    "SignedMinerAxonAnnouncement",
+    "SignedMinerAxonRequest",
+    "SignedResultReport",
+    "SignedScoreboardRequest",
+    "SignedScoreboardSnapshot",
+    "TaskAnswer",
+    "TaskHandler",
+    "TaskPayload",
+    "TaskProfile",
+    "TaskRegistry",
+    "TaskServerClient",
+    "TaskLease",
+    "default_registry",
+]

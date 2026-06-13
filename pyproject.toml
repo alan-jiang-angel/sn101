@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tag101"
+version = "0.1.0"
+description = "Tag101 miner and validator runtime for decentralized social post tagging."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Tag101 Authors" }]
+dependencies = [
+  "aiohttp==3.14.1",
+  "bittensor==10.2.1",
+  "httpx==0.28.1",
+  "munch==4.0.0",
+  "numpy==2.4.6",
+  "pydantic==2.13.4",
+  "scikit-learn==1.9.0",
+  "sentence-transformers==5.5.1",
+  "spacy==3.8.14",
+]
+
+[project.scripts]
+tag101-miner = "tag101.miner:main"
+tag101-validator = "tag101.validator:main"
+
+[tool.setuptools]
+packages = [
+  "tag101",
+  "tag101.chain",
+  "tag101.deploy",
+  "tag101.tasks",
+  "tag101.tasks.framework",
+  "tag101.tasks.sn101_reference",
+  "tag101.tasks.sn101_reference.core",
+  "tag101.tasks.sn101_reference.core.scoring",
+]
+package-dir = { "tag101" = "." }
+
+[tool.setuptools.package-data]
+"tag101.deploy" = ["*.env.example"]

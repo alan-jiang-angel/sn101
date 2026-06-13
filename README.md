@@ -171,7 +171,7 @@ python -m tag101.deploy.docker_node start \
   --env-file validator.env
 ```
 
-### Useful commands
+### Useful commands:
 
 ```bash
 python -m tag101.deploy.docker_node restart --role miner --name sn101-miner --env-file miner.env

@@ -41,10 +41,12 @@ class SolverMiner:
         except Exception:
             synapse.answer = {}
         elapsed = time.perf_counter() - started
+
         self.log.info(
             f"MINER_SOLVED_TASK task={synapse.task_id} kind={synapse.task_kind} "
             f"elapsed={elapsed:.3f}s answer_keys={list(synapse.answer)}"
         )
+        self.log.info(synapse.answer)
         return synapse
 
     async def blacklist(self, synapse: TaskEnvelope, caller_hotkey: str) -> Tuple[bool, str]:

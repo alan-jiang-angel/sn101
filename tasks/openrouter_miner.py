@@ -264,6 +264,7 @@ class OpenRouterMiner:
 
 def solve_problem(envelope: TaskEnvelope, chain_runtime: Any) -> dict[str, Any]:
     post = str(envelope.payload.get("text", ""))
+    print(post)
     miner = OpenRouterMiner()
     try:
         tags = miner.generate_tags(post)

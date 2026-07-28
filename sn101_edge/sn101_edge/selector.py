@@ -21,6 +21,7 @@ Three findings from reading the scorer drive the design:
 from __future__ import annotations
 
 import itertools
+import re
 import math
 from dataclasses import dataclass, field
 
@@ -255,7 +256,13 @@ def build_candidates(
 def _salient_ngrams(ctx: PostContext, limit: int) -> list[str]:
     """Cheap salience ranking over verbatim n-grams.
 
-    Prefers multiword phrases and proper nouns, penalises pure stopword spans.
+    Every candidate here is already verbatim, so validity is locked at 1.0 no
+    matter how long it is. Length therefore buys nothing and costs consensus:
+    rank is keyed on the exact string, and there are far more ways to phrase a
+    3-word tag than a 1-word tag, so long tags fragment the crowd's vote and
+    rarely end up modal. This ranking is deliberately biased SHORT and toward
+    proper nouns, which are the surface forms the field converges on.
+
     This is the offline safety net, not the primary path.
     """
     stop = {
@@ -266,24 +273,84 @@ def _salient_ngrams(ctx: PostContext, limit: int) -> list[str]:
         "can", "not", "no", "if", "than", "then", "there", "here", "what",
         "how", "why", "all", "more", "out", "up", "about", "into", "over",
     }
+    # Verb-led fragments ("benchmarks show", "shipped gpt-5") read as sentence
+    # slices rather than tags, and essentially never appear in another miner's
+    # answer -- which means near-zero consensus.
+    verbish = {
+        "shipped", "show", "shows", "showed", "drop", "drops", "dropped",
+        "said", "says", "say", "get", "gets", "got", "make", "makes", "made",
+        "use", "uses", "used", "add", "adds", "added", "found", "find",
+        "launch", "launched", "release", "released", "announce", "announced",
+        "build", "built", "run", "runs", "think", "know", "want", "need",
+        "look", "looks", "going", "coming", "jump", "jumps", "recover",
+    }
+    # Generic modifiers that are verbatim and short but carry no topic -- the
+    # exact failure mode of a naive "prefer short tags" rule.
+    filler = {
+        "hot", "bad", "good", "big", "small", "great", "best", "worst", "old",
+        "take", "thing", "things", "stuff", "way", "ways", "lot", "bit",
+        "kind", "sort", "part", "time", "day", "year", "people", "guy",
+        "really", "very", "much", "many", "most", "some", "any", "other",
+        "first", "last", "next", "own", "same", "still", "even", "also",
+    }
     raw_words = ctx.post.split()
-    caps = {w.strip(".,!?;:\"'()[]").lower() for w in raw_words if w[:1].isupper()}
+    caps = set()
+    for word in raw_words:
+        cleaned = word.strip(".,!?;:\"'()[]{}")
+        cleaned = re.sub(r"['\u2019]s$", "", cleaned)
+        if cleaned[:1].isupper():
+            caps.add(cleaned.lower())
+
+    # Prefer the units the validator itself treats as meaningful spans.
+    entities = set(_entity_candidates(ctx))
 
     out: list[tuple[float, str]] = []
     for gram in ctx.ngram_candidates(max_n=3):
         words = gram.split()
-        if all(w in stop for w in words):
+        if all(w in stop or w in filler for w in words):
             continue
         if words[0] in stop or words[-1] in stop:
             continue
+        if words[0] in verbish or words[-1] in verbish:
+            continue
+
         score = 0.0
-        score += 0.5 * len(words)                       # prefer phrases
-        score += 1.2 * sum(1 for w in words if w in caps)  # proper nouns
-        score -= 0.4 * sum(1 for w in words if w in stop)
+        # Short is better once validity is guaranteed, but a two-word noun
+        # phrase ("sparse autoencoders") beats a bare modifier ("sparse").
+        score += {1: 1.6, 2: 1.4, 3: 0.4}.get(len(words), 0.0)
+        score += 1.5 * sum(1 for w in words if w in caps)   # proper nouns
+        score += 2.0 if gram in entities else 0.0           # validator spans
+        score -= 0.6 * sum(1 for w in words if w in stop)
+        score -= 1.0 * sum(1 for w in words if w in verbish)
+        score -= 1.8 * sum(1 for w in words if w in filler)
+        # Longer words are rarer and more topical: a crude but effective
+        # stand-in for POS tagging when spaCy is unavailable.
+        score += 0.12 * sum(max(0, len(w) - 5) for w in words)
         out.append((score, gram))
 
-    out.sort(key=lambda kv: -kv[0])
+    out.sort(key=lambda kv: (-kv[0], len(kv[1])))
     return [g for _, g in out[:limit]]
+
+
+def _entity_candidates(ctx: PostContext) -> list[str]:
+    """Entities and noun chunks, using the same spaCy model the validator uses
+    to build scoring spans. Returns [] when spaCy is unavailable."""
+    try:
+        from tag101.tasks.sn101_reference.core.scoring.preprocessing import (
+            extract_entity_and_noun_chunk_spans,
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        spans = extract_entity_and_noun_chunk_spans(ctx.post)
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for span in spans:
+        tag = normalize_tag(span)
+        if tag and ctx.validity_floor(tag) >= 1.0:
+            out.append(tag)
+    return out
 
 
 def estimate_duplicate_decay(

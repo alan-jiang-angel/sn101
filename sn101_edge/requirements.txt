@@ -1,0 +1,7 @@
+# sn101_edge runtime deps.
+# tag101 itself must already be installed (pip install -e /path/to/tag101),
+# which brings numpy, scikit-learn, sentence-transformers and spacy.
+httpx>=0.27
+numpy>=1.26
+scikit-learn>=1.4
+sentence-transformers>=2.7

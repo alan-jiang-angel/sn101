@@ -36,6 +36,7 @@ Generate concise topic tags for a social post.
 Return only a JSON array of distinct lower-case strings.
 Do not include hashtags, URLs, punctuation-only strings, or extra explanation.
 Each tag should use 1-5 words and be semantically meaningful.
+Prioritize tags that are specific to the post content and its main entities.
 """
 
 TAGGING_USER_PROMPT = """\
@@ -43,7 +44,8 @@ Post:
 {post}
 
 Return exactly {candidate_count} tags if possible.
-Use different semantic angles and avoid near-duplicate tags.
+Choose tags that are highly relevant to the main topic, entities, and context of the post.
+Avoid generic buzzwords and near-duplicate tags.
 Output only a JSON array.
 """
 
@@ -200,45 +202,80 @@ class OpenRouterMiner:
         if len(tags) <= self.n_tags:
             return tags[: self.n_tags]
 
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            return tags[: self.n_tags]
+        post_tokens = set(self._tokenize(post))
+        embedding_scores = self._embedding_relevance(post=post, tags=tags)
+        candidates: list[tuple[str, float]] = []
+        for tag in tags:
+            lexical_relevance = self._lexical_relevance(tag=tag, post_tokens=post_tokens)
+            if embedding_scores:
+                embedding_score = embedding_scores[tags.index(tag)]
+                relevance = (embedding_score * 0.6) + (lexical_relevance * 0.4)
+            else:
+                relevance = lexical_relevance
+            candidates.append((tag, relevance))
 
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        text_embeddings = model.encode([post] + tags, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False)
-        post_embedding = text_embeddings[0]
-        tag_embeddings = text_embeddings[1:]
-
-        relevance = [float(max(0.0, min(1.0, float(np.dot(tag_embedding, post_embedding))))) for tag_embedding in tag_embeddings]
-        candidates = sorted(
-            zip(tags, relevance, tag_embeddings),
-            key=lambda item: item[1],
-            reverse=True,
-        )
-
+        ordered = sorted(candidates, key=lambda item: item[1], reverse=True)
         selected: list[str] = []
-        selected_embeddings = []
-        for tag, score, embedding in candidates:
+        for tag, relevance in ordered:
             if len(selected) >= self.n_tags:
                 break
             if not selected:
                 selected.append(tag)
-                selected_embeddings.append(embedding)
                 continue
 
-            max_similarity = max(float(np.dot(embedding, prev)) for prev in selected_embeddings)
-            if max_similarity >= 0.85:
-                continue
-            diversity_bonus = 1.0 - max_similarity
-            combined_score = score * 0.75 + diversity_bonus * 0.25
-            if len(selected) < self.n_tags:
+            diversity_bonus = self._diversity_bonus(tag=tag, selected=selected)
+            combined_score = (relevance * 0.7) + (diversity_bonus * 0.3)
+            if combined_score >= 0.2:
                 selected.append(tag)
-                selected_embeddings.append(embedding)
 
         if len(selected) < self.n_tags:
-            selected.extend(tag for tag, _, _ in candidates if tag not in selected)
+            selected.extend(tag for tag, _ in ordered if tag not in selected)
         return selected[: self.n_tags]
+
+    def _embedding_relevance(self, post: str, tags: list[str]) -> list[float]:
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            return []
+
+        try:
+            model = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            return []
+
+        text_embeddings = model.encode(
+            [post] + tags,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        if np.ndim(text_embeddings) == 1:
+            text_embeddings = np.array([text_embeddings])
+        post_embedding = text_embeddings[0]
+        tag_embeddings = text_embeddings[1:]
+        return [
+            float(max(0.0, min(1.0, float(np.dot(tag_embedding, post_embedding)))))
+            for tag_embedding in tag_embeddings
+        ]
+
+    def _lexical_relevance(self, tag: str, post_tokens: set[str]) -> float:
+        tag_tokens = set(self._tokenize(tag))
+        if not tag_tokens:
+            return 0.0
+        overlap = len(tag_tokens & post_tokens) / max(1, len(tag_tokens))
+        if normalize_tag(tag) and normalize_tag(tag) in normalize_tag(" ".join(post_tokens)):
+            overlap = max(overlap, 0.9)
+        return min(1.0, overlap)
+
+    def _diversity_bonus(self, tag: str, selected: list[str]) -> float:
+        if not selected:
+            return 1.0
+        tag_tokens = set(self._tokenize(tag))
+        selected_tokens = {token for item in selected for token in self._tokenize(item)}
+        if not tag_tokens:
+            return 0.0
+        overlap = len(tag_tokens & selected_tokens) / max(1, len(tag_tokens))
+        return max(0.0, 1.0 - overlap)
 
     def _fill_tags(self, post: str, selected: list[str], candidates: list[str]) -> list[str]:
         for candidate in candidates:
@@ -252,14 +289,29 @@ class OpenRouterMiner:
         return selected[: self.n_tags]
 
     def _fallback_tags(self, post: str) -> list[str]:
-        default_tags = ["ai", "artificial intelligence", "machine learning", "social media", "technology", "natural language processing"]
-        fallback = []
-        for tag in default_tags:
-            if self._is_valid_tag(tag) and tag not in fallback:
-                fallback.append(tag)
-            if len(fallback) >= self.n_tags:
+        tokens = [token for token in self._tokenize(post) if len(token) > 2]
+        default_tags = []
+        for token in tokens:
+            tag = normalize_tag(token)
+            if tag and self._is_valid_tag(tag):
+                default_tags.append(tag)
+            if len(default_tags) >= self.n_tags:
                 break
-        return fallback
+
+        generic_tags = [
+            "ai",
+            "artificial intelligence",
+            "machine learning",
+            "social media",
+            "technology",
+            "natural language processing",
+        ]
+        for tag in generic_tags:
+            if self._is_valid_tag(tag) and tag not in default_tags:
+                default_tags.append(tag)
+            if len(default_tags) >= self.n_tags:
+                break
+        return default_tags[: self.n_tags]
 
 
 def solve_problem(envelope: TaskEnvelope, chain_runtime: Any) -> dict[str, Any]:

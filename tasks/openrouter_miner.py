@@ -55,6 +55,8 @@ URL_PATTERN = re.compile(
 )
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 
+from sentence_transformers import SentenceTransformer
+_EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
 class OpenRouterMiner:
     def __init__(
@@ -233,17 +235,7 @@ class OpenRouterMiner:
         return selected[: self.n_tags]
 
     def _embedding_relevance(self, post: str, tags: list[str]) -> list[float]:
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            return []
-
-        try:
-            model = SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception:
-            return []
-
-        text_embeddings = model.encode(
+        text_embeddings = _EMBED_MODEL.encode(
             [post] + tags,
             convert_to_numpy=True,
             normalize_embeddings=True,
@@ -314,12 +306,13 @@ class OpenRouterMiner:
         return default_tags[: self.n_tags]
 
 
+_OPENROUTER_MINER = OpenRouterMiner()
 def solve_problem(envelope: TaskEnvelope, chain_runtime: Any) -> dict[str, Any]:
     post = str(envelope.payload.get("text", ""))
     print(post)
-    miner = OpenRouterMiner()
+
     try:
-        tags = miner.generate_tags(post)
+        tags = _OPENROUTER_MINER.generate_tags(post)
     except RuntimeError:
         tags = random.sample(
             ["bitcoin", "ethereum", "crypto market", "defi", "stablecoin", "regulation", "etf", "trading"],

@@ -185,7 +185,7 @@ class OpenRouterMiner:
         if any(ch.isalnum() for ch in compact):
             return False
         return all(
-            unicodedata.category(ch).startswith(("S", "P")) "P"))
+            unicodedata.category(ch).startswith(("S", "P"))
             for ch in compact
         )
 

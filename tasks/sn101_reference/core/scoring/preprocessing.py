@@ -173,7 +173,7 @@ def aggregate_miner_score(scores: list[float], top_k: int) -> float:
     if not scores:
         return 0.0
     top_scores = sorted(scores, reverse=True)[:top_k]
-    return float(np.mean(top_scores))
+    return float(sum(top_scores) / top_k)
 
 
 def build_scoring_context(

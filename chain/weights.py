@@ -17,6 +17,8 @@ from ..tasks.framework.models import SignedScoreboardSnapshot
 from ..tasks.framework.signing import verify_model_signature
 
 VERSION_KEY = 100100
+BURN_UID = 0
+BURN_WEIGHT_SHARE = 0.9
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,7 @@ def submit_weights(
 ) -> tuple[bool, str]:
     uids = np.asarray(getattr(metagraph, "uids", np.arange(len(scores))), dtype=np.int64)
     weights = normalized_weights(scores) if normalize else _nonnegative_distribution(scores)
+    weights = _with_burn_weight_share(weights, burn_uid=BURN_UID, share=BURN_WEIGHT_SHARE)
     uid_list = [int(value) for value in np.asarray(uids).ravel().tolist()]
     weight_list = [float(value) for value in np.asarray(weights).ravel().tolist()]
 
@@ -195,6 +198,32 @@ def _nonnegative_distribution(values: np.ndarray) -> np.ndarray:
     if total <= 0.0:
         return np.zeros_like(clean)
     return clean / total
+
+
+def _with_burn_weight_share(
+    values: np.ndarray,
+    *,
+    burn_uid: int,
+    share: float,
+) -> np.ndarray:
+    weights = _nonnegative_distribution(values)
+    if weights.size == 0 or burn_uid < 0 or burn_uid >= weights.size:
+        return weights
+
+    burn_share = min(max(float(share), 0.0), 1.0)
+    remaining_share = 1.0 - burn_share
+    adjusted = np.zeros_like(weights, dtype=np.float64)
+    adjusted[burn_uid] = burn_share
+
+    non_burn = weights.copy()
+    non_burn[burn_uid] = 0.0
+    non_burn = _nonnegative_distribution(non_burn)
+    if remaining_share > 0.0 and not np.any(non_burn > 0):
+        non_burn = np.ones_like(weights, dtype=np.float64)
+        non_burn[burn_uid] = 0.0
+        non_burn = _nonnegative_distribution(non_burn)
+    adjusted += remaining_share * non_burn
+    return _nonnegative_distribution(adjusted)
 
 
 def _align_scores_to_metagraph(
